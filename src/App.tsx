@@ -28,7 +28,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { APP_CONFIG } from './config';
 
 // --- Types ---
-
 type TabType = 'mall' | 'discover' | 'me';
 type FeatureType = 'keyword' | 'upload' | 'style';
 
@@ -52,8 +51,14 @@ const Icons: Record<string, React.ReactNode> = {
   Palette: <Palette className="w-6 h-6" />,
 };
 
-// --- Components ---
+// --- 硅基流动API配置（从环境变量读取） ---
+const GUIGI_CONFIG = {
+  apiKey: import.meta.env.VITE_GEMINI_API_KEY || '', // 你的硅基流动API Key
+  apiUrl: import.meta.env.VITE_GUIGI_API_URL || 'https://api.guiji.ai/v1/chat/completions', // 硅基流动接口地址
+  modelName: import.meta.env.VITE_GUIGI_MODEL_NAME || 'Kwai-Kolors/Kolors', // 文生图模型
+};
 
+// --- Components ---
 const KeyboardPreview = ({ imageUrl }: { imageUrl: string }) => {
   return (
     <div className="relative w-full aspect-[16/10] rounded-2xl overflow-hidden shadow-xl border border-white/20 bg-black/5">
@@ -105,17 +110,62 @@ export default function App() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- 核心修改：替换为硅基流动API调用 ---
   const handleGenerate = async () => {
+    // 基础校验
     if (!prompt && activeFeature === 'keyword') return;
     if (!selectedImage && (activeFeature === 'upload' || activeFeature === 'style')) return;
+    if (!GUIGI_CONFIG.apiKey) {
+      setGeneration({ isGenerating: false, resultUrl: null, error: '请配置硅基流动API Key' });
+      return;
+    }
 
     setGeneration({ isGenerating: true, resultUrl: null, error: null });
 
-    // Simulated Generation (No AI Dependency)
-    setTimeout(() => {
-      const mockUrl = `https://picsum.photos/seed/${Date.now()}/800/500`;
-      setGeneration({ isGenerating: false, resultUrl: mockUrl, error: null });
-    }, 2000);
+    try {
+      // 构建请求参数（适配硅基流动文生图接口）
+      const requestBody = {
+        model: GUIGI_CONFIG.modelName,
+        prompt: `生成一张输入法皮肤图片，要求：${prompt}，尺寸800x500，高清，适合作为输入法背景`,
+        n: 1, // 生成1张
+        size: "800x500", // 适配预览尺寸
+        response_format: "url", // 返回图片URL
+      };
+
+      // 调用硅基流动API
+      const response = await fetch(GUIGI_CONFIG.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GUIGI_CONFIG.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API请求失败：${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      // 解析返回结果（适配硅基流动返回格式）
+      if (data.data && data.data.length > 0) {
+        setGeneration({ 
+          isGenerating: false, 
+          resultUrl: data.data[0].url, 
+          error: null 
+        });
+      } else {
+        throw new Error('未生成有效图片');
+      }
+    } catch (error) {
+      // 错误处理
+      setGeneration({ 
+        isGenerating: false, 
+        resultUrl: null, 
+        error: error instanceof Error ? error.message : '生成失败，请重试' 
+      });
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -437,58 +487,3 @@ export default function App() {
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5" />
-                      <span>开始生成</span>
-                    </>
-                  )}
-                </button>
-
-                {/* Result */}
-                <AnimatePresence>
-                  {generation.resultUrl && (
-                    <motion.div 
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="space-y-4 pt-4 pb-12"
-                    >
-                      <div className="flex items-center justify-between px-1">
-                        <h4 className="font-bold text-sm">预览</h4>
-                        <div className="flex gap-2">
-                          <button className="p-2 bg-white rounded-full shadow-sm border border-gray-100"><Download className="w-4 h-4 text-gray-600" /></button>
-                          <button onClick={handleGenerate} className="p-2 bg-white rounded-full shadow-sm border border-gray-100"><RefreshCw className="w-4 h-4 text-gray-600" /></button>
-                        </div>
-                      </div>
-                      
-                      <KeyboardPreview imageUrl={generation.resultUrl} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {generation.error && (
-                  <div className="p-4 bg-red-50 text-red-500 text-xs rounded-2xl border border-red-100">
-                    {generation.error}
-                  </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// --- Sub-components ---
-
-function TabButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string, key?: string }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={`flex flex-col items-center gap-1 transition-all duration-300 ${active ? 'text-black scale-105' : 'text-gray-400 hover:text-gray-600'}`}
-    >
-      <div className={active ? 'text-black' : ''}>
-        {icon}
-      </div>
-      <span className="text-[10px] font-bold tracking-tight">{label}</span>
-    </button>
-  );
-}
